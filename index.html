@@ -1,0 +1,773 @@
+<!DOCTYPE html>
+<html lang="ko">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="나의맛집">
+    <title>우리 가족 맛집 리스트 (공유형)</title>
+
+    <!-- Firebase SDK (Compat) -->
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database-compat.js"></script>
+
+    <link rel="apple-touch-icon"
+        href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🍽️</text></svg>">
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700&display=swap" rel="stylesheet">
+
+    <style>
+        :root {
+            --primary: #FF6B35;
+            --primary-dark: #E85A2A;
+            --secondary: #2D3047;
+            --bg: #F8F9FA;
+            --card: #FFFFFF;
+            --text: #2D3047;
+            --text-light: #6C757D;
+            --shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Noto Sans KR', sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            color: var(--text);
+            overflow-x: hidden;
+        }
+
+        .app-container {
+            max-width: 480px;
+            margin: 0 auto;
+            min-height: 100vh;
+            background: var(--bg);
+            position: relative;
+        }
+
+        /* Login Screen */
+        .login-screen {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            text-align: center;
+            padding: 20px;
+            background: white;
+        }
+
+        .login-screen h2 {
+            margin-bottom: 30px;
+            font-weight: 700;
+            color: var(--secondary);
+        }
+
+        .btn-google {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 14px 24px;
+            background: white;
+            border: 1px solid #dadce0;
+            border-radius: 30px;
+            font-size: 1rem;
+            font-weight: 500;
+            cursor: pointer;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            transition: background 0.2s;
+        }
+
+        .btn-google:active {
+            background: #f8f9fa;
+        }
+
+        /* App Content */
+        .header {
+            background: linear-gradient(135deg, var(--primary) 0%, #FF8C61 100%);
+            padding: 20px;
+            padding-top: calc(env(safe-area-inset-top) + 20px);
+            color: white;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+
+        .header-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .header h1 {
+            font-size: 1.5rem;
+            font-weight: 700;
+        }
+
+        .user-info {
+            font-size: 0.75rem;
+            opacity: 0.8;
+            margin-top: 5px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .btn-logout {
+            background: none;
+            border: 1px solid rgba(255, 255, 255, 0.4);
+            color: white;
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-size: 0.7rem;
+            cursor: pointer;
+        }
+
+        .search-inner {
+            padding: 15px 20px;
+            background: white;
+            border-bottom: 1px solid #eee;
+        }
+
+        .search-box {
+            display: flex;
+            align-items: center;
+            background: #f5f5f5;
+            border-radius: 12px;
+            padding: 10px 15px;
+            gap: 10px;
+        }
+
+        .search-box input {
+            flex: 1;
+            border: none;
+            background: transparent;
+            font-size: 1rem;
+            outline: none;
+        }
+
+        .list-body {
+            padding: 15px;
+            padding-bottom: 100px;
+        }
+
+        .restaurant-card {
+            background: white;
+            border-radius: 16px;
+            padding: 18px;
+            margin-bottom: 15px;
+            box-shadow: var(--shadow);
+            transition: all 0.2s;
+        }
+
+        .card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 10px;
+        }
+
+        .res-name {
+            font-size: 1.1rem;
+            font-weight: 700;
+            color: var(--secondary);
+        }
+
+        .res-cat {
+            font-size: 0.75rem;
+            color: var(--primary);
+            background: rgba(255, 107, 53, 0.1);
+            padding: 3px 8px;
+            border-radius: 4px;
+        }
+
+        .res-addr {
+            font-size: 0.85rem;
+            color: var(--text-light);
+            margin-bottom: 10px;
+        }
+
+        .tags {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 15px;
+        }
+
+        .tag {
+            font-size: 0.75rem;
+            padding: 4px 10px;
+            border-radius: 20px;
+            font-weight: 500;
+        }
+
+        .tag-waiting {
+            background: #FFF3CD;
+            color: #856404;
+        }
+
+        .tag-parking {
+            background: #E8F5E9;
+            color: #2E7D32;
+        }
+
+        .card-footer {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-top: 1px solid #f0f0f0;
+            padding-top: 12px;
+        }
+
+        .card-date {
+            font-size: 0.75rem;
+            color: #999;
+        }
+
+        .btn-map {
+            background: #1a73e8;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            font-weight: 700;
+            cursor: pointer;
+        }
+
+        .btn-del {
+            border: none;
+            background: #f5f5f5;
+            color: #d93025;
+            width: 34px;
+            height: 34px;
+            border-radius: 50%;
+            font-size: 1.1rem;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .fab {
+            position: fixed;
+            bottom: 30px;
+            right: 25px;
+            width: 60px;
+            height: 60px;
+            background: var(--primary);
+            color: white;
+            border: none;
+            border-radius: 50%;
+            font-size: 2rem;
+            cursor: pointer;
+            box-shadow: 0 4px 15px rgba(255, 107, 53, 0.4);
+            z-index: 100;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        /* Modal */
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.5);
+            z-index: 200;
+            align-items: flex-end;
+            justify-content: center;
+        }
+
+        .modal-overlay.show {
+            display: flex;
+        }
+
+        .modal {
+            background: white;
+            width: 100%;
+            max-width: 480px;
+            border-radius: 24px 24px 0 0;
+            padding: 25px;
+            animation: slideUp 0.3s ease-out;
+            max-height: 85vh;
+            overflow-y: auto;
+        }
+
+        @keyframes slideUp {
+            from {
+                transform: translateY(100%);
+            }
+
+            to {
+                transform: translateY(0);
+            }
+        }
+
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+
+        .close-btn {
+            background: #f5f5f5;
+            border: none;
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            font-size: 1.4rem;
+            color: #666;
+            cursor: pointer;
+        }
+
+        .form-group {
+            margin-bottom: 15px;
+        }
+
+        label {
+            display: block;
+            font-size: 0.8rem;
+            font-weight: 700;
+            margin-bottom: 6px;
+            color: var(--text-light);
+        }
+
+        input,
+        select {
+            width: 100%;
+            padding: 14px;
+            border: 1px solid #ddd;
+            border-radius: 12px;
+            font-size: 1rem;
+            outline-color: var(--primary);
+        }
+
+        .search-row {
+            display: flex;
+            gap: 8px;
+        }
+
+        .search-row input {
+            flex: 1;
+        }
+
+        .btn-search {
+            background: var(--secondary);
+            color: white;
+            border: none;
+            padding: 14px 18px;
+            border-radius: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+        }
+
+        .search-results {
+            background: #fcfcfc;
+            border: 1px solid #eee;
+            border-radius: 12px;
+            margin-top: 10px;
+            display: none;
+        }
+
+        .search-results.show {
+            display: block;
+        }
+
+        .result-item {
+            padding: 12px;
+            border-bottom: 1px solid #eee;
+            cursor: pointer;
+        }
+
+        .result-item:last-child {
+            border-bottom: none;
+        }
+
+        .result-title {
+            font-weight: 700;
+            font-size: 0.95rem;
+        }
+
+        .result-addr {
+            font-size: 0.8rem;
+            color: #888;
+            margin-top: 2px;
+        }
+
+        .btn-submit {
+            width: 100%;
+            padding: 16px;
+            background: var(--primary);
+            color: white;
+            border: none;
+            border-radius: 12px;
+            font-size: 1.1rem;
+            font-weight: 700;
+            margin-top: 10px;
+            cursor: pointer;
+        }
+
+        /* API Key Screen */
+        .api-screen {
+            padding: 40px 20px;
+            text-align: center;
+        }
+
+        .api-screen h2 {
+            margin-bottom: 15px;
+        }
+
+        .loading-ring {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            border-top-color: #fff;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="app-container" id="app">
+        <!-- 1. Google Login -->
+        <div id="screenLogin" class="login-screen" style="display:none;">
+            <div style="font-size: 4rem; margin-bottom: 20px;">👫</div>
+            <h2>우리 가족 맛집 리스트</h2>
+            <p style="color:#777; margin-bottom: 30px;">시작하려면 구글로 로그인하세요</p>
+            <button class="btn-google" onclick="loginGoogle()">
+                <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" width="20">
+                구글 계정으로 로그인
+            </button>
+        </div>
+
+        <!-- 2. Kakao Key Setup -->
+        <div id="screenApi" class="api-screen" style="display:none;">
+            <h2>🔑 카카오 키 설정</h2>
+            <p style="margin-bottom:20px; color:#666;">장소 검색을 위해 카카오 개발자 콘솔의<br><b>[JavaScript 키]</b>를 입력해 주세요.</p>
+            <input type="text" id="kakaoInput" placeholder="JavaScript 키 입력" style="margin-bottom:15px;">
+            <button class="btn-submit" onclick="saveKakaoKey()">설정 완료</button>
+        </div>
+
+        <!-- 3. Main Interface -->
+        <div id="screenMain" style="display:none;">
+            <header class="header">
+                <div class="header-row">
+                    <h1>🍽️ 맛집 리스트</h1>
+                    <button class="btn-logout" onclick="logout()">로그아웃</button>
+                </div>
+                <div class="user-info">
+                    <span id="txtUserEmail">---</span>
+                    <span id="txtSyncStatus" style="color:rgba(255,255,255,0.8);">동기화 중...</span>
+                </div>
+            </header>
+
+            <div class="search-inner">
+                <div class="search-box">
+                    <input type="text" id="filterInput" placeholder="맛집 이름으로 필터링..." oninput="renderList()">
+                </div>
+            </div>
+
+            <div id="listBody" class="list-body"></div>
+            <button class="fab" onclick="openAddModal()">+</button>
+        </div>
+    </div>
+
+    <!-- Modal -->
+    <div id="modalOverlay" class="modal-overlay" onclick="closeModal(event)">
+        <div class="modal" onclick="event.stopPropagation()">
+            <div class="modal-header">
+                <h2>🏠 맛집 추가</h2>
+                <button class="close-btn" onclick="closeModalDirect()">&times;</button>
+            </div>
+            <div class="form-group">
+                <label>상호명 검색</label>
+                <div class="search-row">
+                    <input type="text" id="inputName" placeholder="음식점 이름 입력">
+                    <button class="btn-search" id="btnSearch" onclick="searchKakao()">검색</button>
+                </div>
+                <div id="searchResults" class="search-results"></div>
+            </div>
+            <div class="form-group">
+                <label>종류</label>
+                <input type="text" id="inputCategory" placeholder="자동 입력됨">
+            </div>
+            <div class="form-group">
+                <label>주소</label>
+                <input type="text" id="inputAddress" placeholder="자동 입력됨">
+            </div>
+            <div style="display:flex; gap:10px;">
+                <div class="form-group" style="flex:1;">
+                    <label>웨이팅</label>
+                    <select id="inputWaiting">
+                        <option value="하">하 (여유)</option>
+                        <option value="중">중 (한산)</option>
+                        <option value="상">상 (치열)</option>
+                    </select>
+                </div>
+                <div class="form-group" style="flex:1;">
+                    <label>주차</label>
+                    <select id="inputParking">
+                        <option value="가능">가능</option>
+                        <option value="불가">불가</option>
+                        <option value="공영">공영</option>
+                    </select>
+                </div>
+            </div>
+            <button class="btn-submit" onclick="saveToFirebase()">이 장소 저장하기</button>
+        </div>
+    </div>
+
+    <script>
+        // -------------------------------------------------------------
+        // Firebase Config
+        // -------------------------------------------------------------
+        const firebaseConfig = {
+            apiKey: "AIzaSyBr2MoIH1cLf-yPgdmuZdp0sOCLu5MclIg",
+            authDomain: "musteat-36551.firebaseapp.com",
+            databaseURL: "https://musteat-36551-default-rtdb.firebaseio.com",
+            projectId: "musteat-36551",
+            storageBucket: "musteat-36551.firebasestorage.app",
+            messagingSenderId: "553234121614",
+            appId: "1:553234121614:web:10c5c0d7c2b537edf79adf"
+        };
+
+        // Global State
+        firebase.initializeApp(firebaseConfig);
+        const auth = firebase.auth();
+        const db = firebase.database();
+
+        let kakaoKey = localStorage.getItem('kakao_js_key') || '';
+        let dbItems = [];
+        let selectedPlace = null;
+        let kakaoPlaces = null;
+
+        // -------------------------------------------------------------
+        // Auth Logic
+        // -------------------------------------------------------------
+        auth.onAuthStateChanged(user => {
+            if (!user) {
+                showScreen('screenLogin');
+            } else {
+                document.getElementById('txtUserEmail').innerText = user.displayName + "님 환영해요!";
+                if (!kakaoKey) {
+                    showScreen('screenApi');
+                } else {
+                    initKakaoAndMain();
+                }
+            }
+        });
+
+        function loginGoogle() {
+            const provider = new firebase.auth.GoogleAuthProvider();
+            auth.signInWithRedirect(provider);
+        }
+
+        function logout() {
+            if (confirm('로그아웃 하시겠습니까?')) {
+                auth.signOut();
+                location.reload();
+            }
+        }
+
+        function showScreen(id) {
+            ['screenLogin', 'screenApi', 'screenMain'].forEach(s => {
+                document.getElementById(s).style.display = (s === id ? 'block' : 'none');
+            });
+        }
+
+        // -------------------------------------------------------------
+        // Kakao & Database Logic
+        // -------------------------------------------------------------
+        function saveKakaoKey() {
+            const key = document.getElementById('kakaoInput').value.trim();
+            if (key) {
+                localStorage.setItem('kakao_js_key', key);
+                location.reload();
+            }
+        }
+
+        function initKakaoAndMain() {
+            const script = document.createElement('script');
+            script.src = `https://t1.kakaocdn.net/kakao_js_sdk/2.1.0/kakao.min.js`;
+            script.onload = () => {
+                // Kakao Maps SDK with services
+                const mapScript = document.createElement('script');
+                mapScript.src = `https://dapi.kakao.com/v2/maps/sdk.js?appkey=${kakaoKey}&libraries=services&autoload=false`;
+                mapScript.onload = () => {
+                    kakao.maps.load(() => {
+                        kakaoPlaces = new kakao.maps.services.Places();
+                        showScreen('screenMain');
+                        startDBSync();
+                    });
+                };
+                document.head.appendChild(mapScript);
+            };
+            document.head.appendChild(script);
+        }
+
+        function startDBSync() {
+            // 모든 가족이 공유하는 공통 공간 (/restaurants)
+            const ref = db.ref('restaurants');
+            ref.on('value', snapshot => {
+                const data = snapshot.val();
+                dbItems = [];
+                if (data) {
+                    // 데이터를 배열로 변환 (ID 포함)
+                    Object.keys(data).forEach(key => {
+                        dbItems.push({ id: key, ...data[key] });
+                    });
+                    // 최신순 정렬
+                    dbItems.sort((a, b) => b.timestamp - a.timestamp);
+                }
+                document.getElementById('txtSyncStatus').innerText = "업데이트 됨";
+                renderList();
+            });
+        }
+
+        function renderList() {
+            const listBody = document.getElementById('listBody');
+            const search = document.getElementById('filterInput').value.toLowerCase();
+            const filtered = dbItems.filter(i => i.name.toLowerCase().includes(search) || i.category.toLowerCase().includes(search));
+
+            if (filtered.length === 0) {
+                listBody.innerHTML = '<div style="text-align:center; padding:50px; color:#aaa;">아직 등록된 맛집이 없어요 🍢</div>';
+                return;
+            }
+
+            listBody.innerHTML = filtered.map(item => `
+            <div class="restaurant-card">
+                <div class="card-header">
+                    <span class="res-name">${item.name}</span>
+                    <span class="res-cat">${item.category}</span>
+                </div>
+                <p class="res-addr">${item.address}</p>
+                <div class="tags">
+                    <span class="tag tag-waiting">웨이팅: ${item.waiting}</span>
+                    <span class="tag tag-parking">주차: ${item.parking}</span>
+                </div>
+                <div class="card-footer">
+                    <span class="card-date">${item.date} (${item.author || '가족'})</span>
+                    <div style="display:flex; gap:10px;">
+                        <button class="btn-map" onclick="window.open('${item.mapUrl}', '_blank')">지도보기</button>
+                        <button class="btn-del" onclick="removeFromFirebase('${item.id}')">🗑️</button>
+                    </div>
+                </div>
+            </div>
+        `).join('');
+        }
+
+        // -------------------------------------------------------------
+        // UI Interaction
+        // -------------------------------------------------------------
+        function openAddModal() {
+            document.getElementById('modalOverlay').classList.add('show');
+            resetForm();
+        }
+        function closeModal(e) { if (e.target.id === 'modalOverlay') closeModalDirect(); }
+        function closeModalDirect() { document.getElementById('modalOverlay').classList.remove('show'); }
+
+        function resetForm() {
+            document.getElementById('inputName').value = '';
+            document.getElementById('inputCategory').value = '';
+            document.getElementById('inputAddress').value = '';
+            document.getElementById('searchResults').innerHTML = '';
+            document.getElementById('searchResults').classList.remove('show');
+            selectedPlace = null;
+        }
+
+        function searchKakao() {
+            const q = document.getElementById('inputName').value.trim();
+            if (!q || !kakaoPlaces) return;
+
+            const btn = document.getElementById('btnSearch');
+            btn.disabled = true;
+            btn.innerHTML = '<span class="loading-ring"></span>';
+
+            kakaoPlaces.keywordSearch(q, (result, status) => {
+                btn.disabled = false;
+                btn.innerText = '검색';
+                const resBox = document.getElementById('searchResults');
+
+                if (status === kakao.maps.services.Status.OK) {
+                    resBox.innerHTML = result.slice(0, 5).map((p, i) => `
+                    <div class="result-item" onclick="pickPlace(${i})">
+                        <div class="result-title">${p.place_name}</div>
+                        <div class="result-addr">${p.road_address_name || p.address_name}</div>
+                    </div>
+                `).join('');
+                    resBox.classList.add('show');
+                    window.lastResults = result;
+                } else {
+                    alert('검색 결과가 없습니다.');
+                }
+            });
+        }
+
+        function pickPlace(i) {
+            const p = window.lastResults[i];
+            selectedPlace = p;
+            document.getElementById('inputName').value = p.place_name;
+            document.getElementById('inputAddress').value = p.road_address_name || p.address_name;
+            document.getElementById('inputCategory').value = p.category_name.split(' > ').pop();
+            document.getElementById('searchResults').classList.remove('show');
+        }
+
+        function saveToFirebase() {
+            const name = document.getElementById('inputName').value.trim();
+            if (!name) return;
+
+            const user = auth.currentUser;
+            const now = new Date();
+            const dateStr = `${now.getFullYear()}.${String(now.getMonth() + 1).padStart(2, '0')}.${String(now.getDate()).padStart(2, '0')}`;
+
+            const newItem = {
+                name: name,
+                category: document.getElementById('inputCategory').value || '기타',
+                address: document.getElementById('inputAddress').value || '정보 없음',
+                waiting: document.getElementById('inputWaiting').value,
+                parking: document.getElementById('inputParking').value,
+                date: dateStr,
+                timestamp: Date.now(),
+                author: user.displayName,
+                mapUrl: selectedPlace ? selectedPlace.place_url : `https://map.kakao.com/?q=${encodeURIComponent(name)}`
+            };
+
+            document.getElementById('txtSyncStatus').innerText = "저장 중...";
+            db.ref('restaurants').push(newItem).then(() => {
+                closeModalDirect();
+            });
+        }
+
+        function removeFromFirebase(id) {
+            if (confirm('삭제하시겠습니까? (상대방 기기에서도 삭제됩니다)')) {
+                document.getElementById('txtSyncStatus').innerText = "삭제 중...";
+                db.ref(`restaurants/${id}`).remove();
+            }
+        }
+    </script>
+
+</body>
+
+</html>
