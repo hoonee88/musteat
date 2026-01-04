@@ -7,7 +7,7 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="나의맛집">
-    <title>우리 가족 맛집 리스트 (공유형)</title>
+    <title>맛도리</title>
 
     <!-- Firebase SDK (Compat) -->
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
@@ -498,7 +498,7 @@
     <div id="modalOverlay" class="modal-overlay" onclick="closeModal(event)">
         <div class="modal" onclick="event.stopPropagation()">
             <div class="modal-header">
-                <h2>🏠 맛집 추가</h2>
+                <h2 id="modalTitle">🏠 맛집 추가</h2>
                 <button class="close-btn" onclick="closeModalDirect()">&times;</button>
             </div>
             <div class="form-group">
@@ -535,7 +535,7 @@
                     </select>
                 </div>
             </div>
-            <button class="btn-submit" onclick="saveToFirebase()">이 장소 저장하기</button>
+            <button class="btn-submit" id="btnSubmit" onclick="saveToFirebase()">이 장소 저장하기</button>
         </div>
     </div>
 
@@ -565,6 +565,7 @@
 
         let kakaoKey = localStorage.getItem('kakao_js_key') || '';
         let dbItems = [];
+        let editingId = null;
         let selectedPlace = null;
         let kakaoPlaces = null;
 
@@ -698,6 +699,7 @@
                     <span class="card-date">${item.date} (${item.author || '가족'})</span>
                     <div style="display:flex; gap:10px;">
                         <button class="btn-map" onclick="window.open('${item.mapUrl}', '_blank')">지도보기</button>
+                        <button class="btn-del" style="background:#e8f0fe; color:#1a73e8;" onclick="openEditModal('${item.id}')">✏️</button>
                         <button class="btn-del" onclick="removeFromFirebase('${item.id}')">🗑️</button>
                     </div>
                 </div>
@@ -709,11 +711,42 @@
         // UI Interaction
         // -------------------------------------------------------------
         function openAddModal() {
+            editingId = null;
+            document.getElementById('modalTitle').innerText = '🏠 맛집 추가';
+            document.getElementById('btnSubmit').innerText = '이 장소 저장하기';
             document.getElementById('modalOverlay').classList.add('show');
             resetForm();
         }
+
+        function openEditModal(id) {
+            const item = dbItems.find(i => i.id === id);
+            if (!item) return;
+
+            editingId = id;
+            document.getElementById('modalTitle').innerText = '✏️ 맛집 수정';
+            document.getElementById('btnSubmit').innerText = '수정 완료';
+
+            document.getElementById('inputName').value = item.name;
+            document.getElementById('inputCategory').value = item.category;
+            document.getElementById('inputAddress').value = item.address;
+            document.getElementById('inputWaiting').value = item.waiting;
+            document.getElementById('inputParking').value = item.parking;
+
+            selectedPlace = {
+                place_name: item.name,
+                place_url: item.mapUrl,
+                road_address_name: item.address,
+                category_name: item.category
+            };
+
+            document.getElementById('modalOverlay').classList.add('show');
+        }
+
         function closeModal(e) { if (e.target.id === 'modalOverlay') closeModalDirect(); }
-        function closeModalDirect() { document.getElementById('modalOverlay').classList.remove('show'); }
+        function closeModalDirect() {
+            document.getElementById('modalOverlay').classList.remove('show');
+            editingId = null;
+        }
 
         function resetForm() {
             document.getElementById('inputName').value = '';
@@ -769,7 +802,7 @@
             const now = new Date();
             const dateStr = `${now.getFullYear()}.${String(now.getMonth() + 1).padStart(2, '0')}.${String(now.getDate()).padStart(2, '0')}`;
 
-            const newItem = {
+            const itemData = {
                 name: name,
                 category: document.getElementById('inputCategory').value || '기타',
                 address: document.getElementById('inputAddress').value || '정보 없음',
@@ -781,7 +814,10 @@
                 mapUrl: selectedPlace ? selectedPlace.place_url : `https://map.kakao.com/?q=${encodeURIComponent(name)}`
             };
 
-            db.ref('restaurants').push(newItem).then(() => {
+            const ref = db.ref('restaurants');
+            const promise = editingId ? ref.child(editingId).update(itemData) : ref.push(itemData);
+
+            promise.then(() => {
                 closeModalDirect();
             }).catch(err => {
                 console.error("저장 에러:", err);
