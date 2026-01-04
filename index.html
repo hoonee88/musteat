@@ -14,8 +14,8 @@
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database-compat.js"></script>
 
-    <link rel="apple-touch-icon"
-        href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🍽️</text></svg>">
+    <link rel="icon" type="image/png" href="icon.png">
+    <link rel="apple-touch-icon" href="icon.png">
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700&display=swap" rel="stylesheet">
 
     <style>
@@ -485,7 +485,7 @@
 
             <div class="search-inner">
                 <div class="search-box">
-                    <input type="text" id="filterInput" placeholder="맛집 이름으로 필터링..." oninput="renderList()">
+                    <input type="text" id="filterInput" placeholder="맛집 이름 또는 주소로 검색..." oninput="renderList()">
                 </div>
             </div>
 
@@ -534,6 +534,11 @@
                         <option value="공영">공영</option>
                     </select>
                 </div>
+            </div>
+            <div class="form-group">
+                <label>추가 메모</label>
+                <textarea id="inputMemo" placeholder="예: 시그니처 메뉴, 주의사항 등"
+                    style="width:100%; padding:14px; border:1px solid #ddd; border-radius:12px; font-size:1rem; min-height:80px; resize:vertical; font-family:inherit;"></textarea>
             </div>
             <button class="btn-submit" id="btnSubmit" onclick="saveToFirebase()">이 장소 저장하기</button>
         </div>
@@ -676,7 +681,9 @@
             const search = document.getElementById('filterInput').value.toLowerCase();
             const filtered = dbItems.filter(i =>
                 i.name.toLowerCase().includes(search) ||
-                i.category.toLowerCase().includes(search)
+                i.category.toLowerCase().includes(search) ||
+                i.address.toLowerCase().includes(search) ||
+                (i.memo && i.memo.toLowerCase().includes(search))
             );
 
             if (filtered.length === 0) {
@@ -691,6 +698,7 @@
                     <span class="res-cat">${item.category}</span>
                 </div>
                 <p class="res-addr">${item.address}</p>
+                ${item.memo ? `<p style="font-size:0.85rem; color:#555; background:#f9f9f9; padding:8px 12px; border-radius:8px; margin-bottom:10px; border-left:3px solid var(--primary);">📝 ${item.memo}</p>` : ''}
                 <div class="tags">
                     <span class="tag tag-waiting">웨이팅: ${item.waiting}</span>
                     <span class="tag tag-parking">주차: ${item.parking}</span>
@@ -731,6 +739,7 @@
             document.getElementById('inputAddress').value = item.address;
             document.getElementById('inputWaiting').value = item.waiting;
             document.getElementById('inputParking').value = item.parking;
+            document.getElementById('inputMemo').value = item.memo || '';
 
             selectedPlace = {
                 place_name: item.name,
@@ -752,6 +761,7 @@
             document.getElementById('inputName').value = '';
             document.getElementById('inputCategory').value = '';
             document.getElementById('inputAddress').value = '';
+            document.getElementById('inputMemo').value = '';
             document.getElementById('searchResults').innerHTML = '';
             document.getElementById('searchResults').classList.remove('show');
             selectedPlace = null;
@@ -808,6 +818,7 @@
                 address: document.getElementById('inputAddress').value || '정보 없음',
                 waiting: document.getElementById('inputWaiting').value,
                 parking: document.getElementById('inputParking').value,
+                memo: document.getElementById('inputMemo').value.trim() || '',
                 date: dateStr,
                 timestamp: Date.now(),
                 author: user.displayName || user.email.split('@')[0],
