@@ -458,7 +458,7 @@
             <p style="color:#777; margin-bottom: 30px;">시작하려면 구글로 로그인하세요</p>
             <button class="btn-google" onclick="loginGoogle()">
                 <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" width="20">
-                구글 계정으로 로그인
+                구글 계정으로 로그인 (팝업창)
             </button>
         </div>
 
@@ -478,8 +478,8 @@
                     <button class="btn-logout" onclick="logout()">로그아웃</button>
                 </div>
                 <div class="user-info">
-                    <span id="txtUserEmail">---</span>
-                    <span id="txtSyncStatus" style="color:rgba(255,255,255,0.8);">동기화 중...</span>
+                    <span id="txtUserEmail">사용자 확인 중...</span>
+                    <span id="txtSyncStatus" style="color:rgba(255,255,255,0.8); font-weight: bold;">동기화 중...</span>
                 </div>
             </header>
 
@@ -541,7 +541,7 @@
 
     <script>
         // -------------------------------------------------------------
-        // Firebase Config
+        // Firebase Config (보강됨)
         // -------------------------------------------------------------
         const firebaseConfig = {
             apiKey: "AIzaSyBr2MoIH1cLf-yPgdmuZdp0sOCLu5MclIg",
@@ -553,10 +553,15 @@
             appId: "1:553234121614:web:10c5c0d7c2b537edf79adf"
         };
 
-        // Global State
-        firebase.initializeApp(firebaseConfig);
+        // Firebase Init
+        if (!firebase.apps.length) {
+            firebase.initializeApp(firebaseConfig);
+        }
         const auth = firebase.auth();
         const db = firebase.database();
+
+        // Auth Persistence (로그인 유지력 강화)
+        auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
 
         let kakaoKey = localStorage.getItem('kakao_js_key') || '';
         let dbItems = [];
@@ -564,13 +569,14 @@
         let kakaoPlaces = null;
 
         // -------------------------------------------------------------
-        // Auth Logic
+        // Auth Logic (전면 보강)
         // -------------------------------------------------------------
         auth.onAuthStateChanged(user => {
+            console.log("인증 상태 변경:", user ? user.email : "로그아웃 상태");
             if (!user) {
                 showScreen('screenLogin');
             } else {
-                document.getElementById('txtUserEmail').innerText = user.displayName + "님 환영해요!";
+                document.getElementById('txtUserEmail').innerText = user.displayName ? user.displayName + "님" : user.email;
                 if (!kakaoKey) {
                     showScreen('screenApi');
                 } else {
@@ -581,13 +587,25 @@
 
         function loginGoogle() {
             const provider = new firebase.auth.GoogleAuthProvider();
-            auth.signInWithRedirect(provider);
+            // 팝업 방식으로 변경 (GitHub Pages에서 더 안정적)
+            auth.signInWithPopup(provider).then((result) => {
+                console.log("로그인 성공:", result.user.email);
+            }).catch((error) => {
+                console.error("로그인 에러:", error);
+                // 만약 팝업이 차단되었다면 리다이렉트로 대체 시도
+                if (error.code === 'auth/popup-blocked') {
+                    auth.signInWithRedirect(provider);
+                } else {
+                    alert("로그인 중 오류가 발생했습니다: " + error.message);
+                }
+            });
         }
 
         function logout() {
             if (confirm('로그아웃 하시겠습니까?')) {
-                auth.signOut();
-                location.reload();
+                auth.signOut().then(() => {
+                    location.reload();
+                });
             }
         }
 
@@ -609,10 +627,16 @@
         }
 
         function initKakaoAndMain() {
+            // 이미 로드되었으면 중복 로드 방지
+            if (window.kakao && window.kakao.maps) {
+                showScreen('screenMain');
+                startDBSync();
+                return;
+            }
+
             const script = document.createElement('script');
             script.src = `https://t1.kakaocdn.net/kakao_js_sdk/2.1.0/kakao.min.js`;
             script.onload = () => {
-                // Kakao Maps SDK with services
                 const mapScript = document.createElement('script');
                 mapScript.src = `https://dapi.kakao.com/v2/maps/sdk.js?appkey=${kakaoKey}&libraries=services&autoload=false`;
                 mapScript.onload = () => {
@@ -628,28 +652,31 @@
         }
 
         function startDBSync() {
-            // 모든 가족이 공유하는 공통 공간 (/restaurants)
             const ref = db.ref('restaurants');
             ref.on('value', snapshot => {
                 const data = snapshot.val();
                 dbItems = [];
                 if (data) {
-                    // 데이터를 배열로 변환 (ID 포함)
                     Object.keys(data).forEach(key => {
                         dbItems.push({ id: key, ...data[key] });
                     });
-                    // 최신순 정렬
                     dbItems.sort((a, b) => b.timestamp - a.timestamp);
                 }
-                document.getElementById('txtSyncStatus').innerText = "업데이트 됨";
+                document.getElementById('txtSyncStatus').innerText = "✅ 동기화 완료";
                 renderList();
+            }, error => {
+                console.error("DB 동기화 에러:", error);
+                document.getElementById('txtSyncStatus').innerText = "❌ 동기화 실패";
             });
         }
 
         function renderList() {
             const listBody = document.getElementById('listBody');
             const search = document.getElementById('filterInput').value.toLowerCase();
-            const filtered = dbItems.filter(i => i.name.toLowerCase().includes(search) || i.category.toLowerCase().includes(search));
+            const filtered = dbItems.filter(i =>
+                i.name.toLowerCase().includes(search) ||
+                i.category.toLowerCase().includes(search)
+            );
 
             if (filtered.length === 0) {
                 listBody.innerHTML = '<div style="text-align:center; padding:50px; color:#aaa;">아직 등록된 맛집이 없어요 🍢</div>';
@@ -750,19 +777,20 @@
                 parking: document.getElementById('inputParking').value,
                 date: dateStr,
                 timestamp: Date.now(),
-                author: user.displayName,
+                author: user.displayName || user.email.split('@')[0],
                 mapUrl: selectedPlace ? selectedPlace.place_url : `https://map.kakao.com/?q=${encodeURIComponent(name)}`
             };
 
-            document.getElementById('txtSyncStatus').innerText = "저장 중...";
             db.ref('restaurants').push(newItem).then(() => {
                 closeModalDirect();
+            }).catch(err => {
+                console.error("저장 에러:", err);
+                alert("저장에 실패했습니다. 보안 규칙을 확인하세요.");
             });
         }
 
         function removeFromFirebase(id) {
-            if (confirm('삭제하시겠습니까? (상대방 기기에서도 삭제됩니다)')) {
-                document.getElementById('txtSyncStatus').innerText = "삭제 중...";
+            if (confirm('삭제하시겠습니까? (가족 모두의 목록에서 삭제됩니다)')) {
                 db.ref(`restaurants/${id}`).remove();
             }
         }
