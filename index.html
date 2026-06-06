@@ -78,12 +78,14 @@
     let naverClientId = localStorage.getItem('naver_maps_client_id') || '';
     let naverProxyUrl = localStorage.getItem('naver_local_proxy_url') || '';
     let dbItems = [], editingId = null, selectedPlace = null;
-    let naverMap = null, markers = [], infoWindow = null, currentView = 'list';
+    let naverMap = null, markers = [], infoWindow = null, currentView = 'list', dbSyncStarted = false;
 
     const $ = id => document.getElementById(id);
     const esc = v => String(v ?? '').replace(/[&<>'"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
     const stripTags = v => String(v ?? '').replace(/<[^>]*>/g, '');
-    const naverSearchUrl = item => item.mapUrl || `https://map.naver.com/v5/search/${encodeURIComponent(item.name + ' ' + (item.address || ''))}`;
+    const makeNaverMapUrl = item => `https://map.naver.com/v5/search/${encodeURIComponent((item.name || '') + ' ' + (item.address || ''))}`;
+    const isNaverMapUrl = url => /^https?:\/\/([^/]+\.)?map\.naver\.com\//.test(String(url || ''));
+    const naverSearchUrl = item => isNaverMapUrl(item.mapUrl) ? item.mapUrl : makeNaverMapUrl(item);
 
     auth.onAuthStateChanged(user => {
       authReady.finally(() => {
@@ -136,11 +138,13 @@
     }
 
     function startDBSync(){
+      if (dbSyncStarted) return;
+      dbSyncStarted = true;
       db.ref('restaurants').on('value', snapshot => {
         const data = snapshot.val(); dbItems = [];
         if (data) Object.keys(data).forEach(key => dbItems.push({id:key, ...data[key]}));
         dbItems.sort((a,b) => (b.timestamp || 0) - (a.timestamp || 0));
-        $('txtSyncStatus').innerText = '✅ 동기화 완료'; renderList(); if (currentView === 'map') initMap(); autoGeocodeMissingItems();
+        $('txtSyncStatus').innerText = '✅ 동기화 완료'; renderList(); if (currentView === 'map') initMap(); normalizeLegacyMapUrls(); autoGeocodeMissingItems();
       }, error => { console.error(error); $('txtSyncStatus').innerText = '❌ 동기화 실패'; });
     }
 
@@ -203,7 +207,12 @@
     }
     async function searchByProxy(q){
       const url = `${naverProxyUrl}${naverProxyUrl.includes('?') ? '&' : '?'}query=${encodeURIComponent(q)}`; const r = await fetch(url); if(!r.ok) throw new Error('proxy failed'); const data = await r.json();
-      const items = data.items || data.documents || data.results || []; return items.map(it => ({ name: stripTags(it.title || it.name || it.place_name || q), category: stripTags(it.category || '기타'), address: stripTags(it.roadAddress || it.address || it.road_address_name || it.address_name || ''), lat: it.lat || it.latitude || (it.mapy ? Number(it.mapy) / 10000000 : ''), lng: it.lng || it.longitude || (it.mapx ? Number(it.mapx) / 10000000 : ''), mapUrl: it.link || '' })).filter(x => x.name || x.address);
+      const items = data.items || data.documents || data.results || [];
+      return items.map(it => {
+        const name = stripTags(it.title || it.name || it.place_name || q);
+        const address = stripTags(it.roadAddress || it.address || it.road_address_name || it.address_name || '');
+        return { name, category: stripTags(it.category || '기타'), address, lat: it.lat || it.latitude || (it.mapy ? Number(it.mapy) / 10000000 : ''), lng: it.lng || it.longitude || (it.mapx ? Number(it.mapx) / 10000000 : ''), mapUrl: isNaverMapUrl(it.link) ? it.link : makeNaverMapUrl({name, address}) };
+      }).filter(x => x.name || x.address);
     }
     function geocodeToResults(q){ return new Promise(resolve => { if(!window.naver?.maps?.Service?.geocode) return resolve([]); naver.maps.Service.geocode({query:q}, (status, response) => { if(status !== naver.maps.Service.Status.OK) return resolve([]); const addresses = response.v2?.addresses || []; resolve(addresses.map(a => ({name:q, category:'기타', address:a.roadAddress || a.jibunAddress || q, lat:Number(a.y), lng:Number(a.x), mapUrl:`https://map.naver.com/v5/search/${encodeURIComponent(q)}`}))); }); }); }
     function pickPlace(i){ const p = window.lastResults[i]; selectedPlace = p; $('inputName').value = p.name; $('inputCategory').value = p.category || '기타'; $('inputAddress').value = p.address || ''; $('inputLat').value = p.lat || ''; $('inputLng').value = p.lng || ''; $('searchResults').classList.remove('show'); }
@@ -212,16 +221,24 @@
     async function saveToFirebase(){
       const name = $('inputName').value.trim(); if(!name) return alert('상호명을 입력해 주세요.'); if(!$('inputLat').value || !$('inputLng').value) await geocodeAddressFromForm();
       const user = auth.currentUser; const now = new Date(); const dateStr = `${now.getFullYear()}.${String(now.getMonth()+1).padStart(2,'0')}.${String(now.getDate()).padStart(2,'0')}`;
-      const itemData = { name, category:$('inputCategory').value || '기타', address:$('inputAddress').value || '정보 없음', waiting:$('inputWaiting').value, parking:$('inputParking').value, memo:$('inputMemo').value.trim() || '', date:dateStr, timestamp:Date.now(), author:user.displayName || user.email.split('@')[0], lat:$('inputLat').value ? Number($('inputLat').value) : null, lng:$('inputLng').value ? Number($('inputLng').value) : null, mapUrl:selectedPlace?.mapUrl || `https://map.naver.com/v5/search/${encodeURIComponent(name + ' ' + ($('inputAddress').value || ''))}` };
+      const itemData = { name, category:$('inputCategory').value || '기타', address:$('inputAddress').value || '정보 없음', waiting:$('inputWaiting').value, parking:$('inputParking').value, memo:$('inputMemo').value.trim() || '', date:dateStr, timestamp:Date.now(), author:user.displayName || user.email.split('@')[0], lat:$('inputLat').value ? Number($('inputLat').value) : null, lng:$('inputLng').value ? Number($('inputLng').value) : null, mapUrl:isNaverMapUrl(selectedPlace?.mapUrl) ? selectedPlace.mapUrl : makeNaverMapUrl({name, address:$('inputAddress').value || ''}) };
       const ref = db.ref('restaurants'); const promise = editingId ? ref.child(editingId).update(itemData) : ref.push(itemData); promise.then(closeModalDirect).catch(err => { console.error(err); alert('저장에 실패했습니다. 보안 규칙을 확인하세요.'); });
     }
     function removeFromFirebase(id){ if(confirm('삭제하시겠습니까? (가족 모두의 목록에서 삭제됩니다)')) db.ref(`restaurants/${id}`).remove(); }
+
+    async function normalizeLegacyMapUrls(){
+      const targets = dbItems.filter(i => i.mapUrl && !isNaverMapUrl(i.mapUrl)).slice(0,20);
+      for (const item of targets) {
+        try { await db.ref(`restaurants/${item.id}`).update({mapUrl: makeNaverMapUrl(item)}); }
+        catch(e) { console.warn('legacy mapUrl normalize failed', item.id, e); }
+      }
+    }
 
     let geocodeQueueRunning = false;
     async function autoGeocodeMissingItems(){
       if(geocodeQueueRunning || !window.naver?.maps?.Service?.geocode) return; geocodeQueueRunning = true;
       const targets = dbItems.filter(i => (!i.lat || !i.lng) && i.address && i.address !== '정보 없음').slice(0,5);
-      for (const item of targets) { try { const r = await geocodeToResults(item.address); if(r[0]) await db.ref(`restaurants/${item.id}`).update({lat:r[0].lat,lng:r[0].lng,mapUrl:item.mapUrl || `https://map.naver.com/v5/search/${encodeURIComponent(item.name + ' ' + item.address)}`}); } catch(e) { console.warn('auto geocode failed', item.id, e); } }
+      for (const item of targets) { try { const r = await geocodeToResults(item.address); if(r[0]) await db.ref(`restaurants/${item.id}`).update({lat:r[0].lat,lng:r[0].lng,mapUrl:makeNaverMapUrl(item)}); } catch(e) { console.warn('auto geocode failed', item.id, e); } }
       geocodeQueueRunning = false;
     }
   </script>
