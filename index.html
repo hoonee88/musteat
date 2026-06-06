@@ -69,7 +69,11 @@
 
     if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
     const auth = firebase.auth(); const db = firebase.database();
-    auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
+    const authReady = auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL)
+      .then(() => auth.getRedirectResult().catch(error => {
+        console.error('리다이렉트 로그인 결과 처리 오류:', error);
+        alert('로그인 결과 처리 중 오류가 발생했습니다: ' + error.message);
+      }));
 
     let naverClientId = localStorage.getItem('naver_maps_client_id') || '';
     let naverProxyUrl = localStorage.getItem('naver_local_proxy_url') || '';
@@ -82,17 +86,32 @@
     const naverSearchUrl = item => item.mapUrl || `https://map.naver.com/v5/search/${encodeURIComponent(item.name + ' ' + (item.address || ''))}`;
 
     auth.onAuthStateChanged(user => {
-      if (!user) return showScreen('screenLogin');
-      $('txtUserEmail').innerText = user.displayName ? user.displayName + '님' : user.email;
-      if (!naverClientId) showScreen('screenApi'); else initNaverAndMain();
+      authReady.finally(() => {
+        if (!user) return showScreen('screenLogin');
+        $('txtUserEmail').innerText = user.displayName ? user.displayName + '님' : user.email;
+        if (!naverClientId) showScreen('screenApi'); else initNaverAndMain();
+      });
     });
 
-    function loginGoogle(){
+    async function loginGoogle(){
       const provider = new firebase.auth.GoogleAuthProvider();
-      auth.signInWithRedirect(provider).catch(error => {
-        console.error('로그인 에러:', error);
-        alert('로그인 중 오류가 발생했습니다: ' + error.message);
-      });
+      provider.setCustomParameters({ prompt: 'select_account' });
+      await authReady;
+      try {
+        await auth.signInWithPopup(provider);
+      } catch (error) {
+        console.error('팝업 로그인 에러:', error);
+        if (['auth/popup-blocked', 'auth/popup-closed-by-user', 'auth/cancelled-popup-request', 'auth/operation-not-supported-in-this-environment'].includes(error.code)) {
+          try {
+            await auth.signInWithRedirect(provider);
+          } catch (redirectError) {
+            console.error('리다이렉트 로그인 에러:', redirectError);
+            alert('로그인 중 오류가 발생했습니다: ' + redirectError.message);
+          }
+        } else {
+          alert('로그인 중 오류가 발생했습니다: ' + error.message);
+        }
+      }
     }
     function logout(){ if(confirm('로그아웃 하시겠습니까?')) auth.signOut().then(() => location.reload()); }
     function showScreen(id){ ['screenLogin','screenApi','screenMain'].forEach(s => $(s).style.display = s === id ? 'block' : 'none'); }
