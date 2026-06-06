@@ -89,7 +89,7 @@
       authReady.finally(() => {
         if (!user) return showScreen('screenLogin');
         $('txtUserEmail').innerText = user.displayName ? user.displayName + '님' : user.email;
-        if (!naverClientId) showScreen('screenApi'); else initNaverAndMain();
+        initNaverAndMain();
       });
     });
 
@@ -118,11 +118,20 @@
     function saveNaverSettings(){ const key = $('naverInput').value.trim(); const proxy = $('naverProxyInput').value.trim(); if(!key) return alert('네이버 지도 Client ID를 입력해 주세요.'); localStorage.setItem('naver_maps_client_id', key); if(proxy) localStorage.setItem('naver_local_proxy_url', proxy); else localStorage.removeItem('naver_local_proxy_url'); location.reload(); }
 
     function initNaverAndMain(){
-      if (window.naver && window.naver.maps) { showScreen('screenMain'); startDBSync(); return; }
+      showScreen('screenMain');
+      startDBSync();
+      if (!naverClientId) {
+        $('txtSyncStatus').innerText = '✅ 목록 동기화';
+        return;
+      }
+      if (window.naver && window.naver.maps) return;
       const script = document.createElement('script');
       script.src = `https://oapi.map.naver.com/openapi/v3/maps.js?ncpKeyId=${encodeURIComponent(naverClientId)}&submodules=geocoder`;
-      script.onerror = () => { alert('네이버 지도 SDK 로드 실패. Client ID와 도메인 허용 설정을 확인해 주세요.'); showScreen('screenApi'); };
-      script.onload = () => { showScreen('screenMain'); startDBSync(); };
+      script.onerror = () => {
+        console.error('네이버 지도 SDK 로드 실패');
+        alert('네이버 지도 SDK 로드 실패. Client ID와 도메인 허용 설정을 확인해 주세요. 맛집 목록은 계속 사용할 수 있습니다.');
+      };
+      script.onload = () => { if (currentView === 'map') initMap(); autoGeocodeMissingItems(); };
       document.head.appendChild(script);
     }
 
@@ -146,7 +155,21 @@
         <div class="card-footer"><span class="card-date">${esc(item.date || '')} (${esc(item.author || '가족')})</span><div class="inline-actions"><button class="btn-map" onclick="openNaverMap('${esc(item.id)}')">지도</button><button class="btn-del" style="background:#e8f0fe;color:#1a73e8;" onclick="openEditModal('${esc(item.id)}')">✏️</button><button class="btn-del" onclick="removeFromFirebase('${esc(item.id)}')">🗑️</button></div></div></div>`).join('');
     }
 
-    function switchView(view){ currentView = view; $('tabList').classList.toggle('active', view === 'list'); $('tabMap').classList.toggle('active', view === 'map'); $('listPanel').style.display = view === 'list' ? 'block' : 'none'; $('mapPanel').classList.toggle('show', view === 'map'); if(view === 'map') setTimeout(initMap, 80); }
+    function switchView(view){
+      if (view === 'map' && !naverClientId) {
+        const key = prompt('지도 핀 기능을 쓰려면 네이버 Maps JavaScript API Client ID/ncpKeyId를 입력해 주세요.');
+        if (!key) return;
+        localStorage.setItem('naver_maps_client_id', key.trim());
+        naverClientId = key.trim();
+        initNaverAndMain();
+      }
+      currentView = view;
+      $('tabList').classList.toggle('active', view === 'list');
+      $('tabMap').classList.toggle('active', view === 'map');
+      $('listPanel').style.display = view === 'list' ? 'block' : 'none';
+      $('mapPanel').classList.toggle('show', view === 'map');
+      if(view === 'map') setTimeout(initMap, 80);
+    }
     function initMap(){
       if (!window.naver || !window.naver.maps) return;
       const withCoords = getFilteredItems().filter(i => Number(i.lat) && Number(i.lng));
