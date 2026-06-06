@@ -47,7 +47,7 @@
   </div>
 
   <div id="modalOverlay" class="modal-overlay" onclick="closeModal(event)"><div class="modal" onclick="event.stopPropagation()"><div class="modal-header"><h2 id="modalTitle">🏠 맛집 추가</h2><button class="close-btn" onclick="closeModalDirect()">&times;</button></div>
-    <div class="form-group"><label>상호명/주소 검색</label><div class="search-row"><input type="text" id="inputName" placeholder="음식점 이름 또는 주소 입력" /><button class="btn-search" id="btnSearch" onclick="searchNaver()">검색</button></div><div id="searchResults" class="search-results"></div></div>
+    <div class="form-group"><label>상호명/주소 검색</label><div class="search-row"><input type="text" id="inputName" placeholder="주소 검색 권장: 예) 서울 강남구 ..." /><button class="btn-search" id="btnSearch" onclick="searchNaver()">검색</button></div><div id="searchResults" class="search-results"></div></div>
     <div class="form-group"><label>종류</label><input type="text" id="inputCategory" placeholder="예: 한식, 일식, 카페" /></div>
     <div class="form-group"><label>주소</label><input type="text" id="inputAddress" placeholder="검색 선택 시 자동 입력" onchange="geocodeAddressFromForm()" /></div>
     <div style="display:flex;gap:10px;"><div class="form-group" style="flex:1;"><label>위도</label><input type="number" step="any" id="inputLat" placeholder="자동" /></div><div class="form-group" style="flex:1;"><label>경도</label><input type="number" step="any" id="inputLng" placeholder="자동" /></div></div>
@@ -78,12 +78,13 @@
     let naverClientId = localStorage.getItem('naver_maps_client_id') || '';
     let naverProxyUrl = localStorage.getItem('naver_local_proxy_url') || '';
     let dbItems = [], editingId = null, selectedPlace = null;
-    let naverMap = null, markers = [], infoWindow = null, currentView = 'list', dbSyncStarted = false;
+    let naverMap = null, markers = [], infoWindow = null, currentView = 'list', dbSyncStarted = false, mapClickCloseBound = false;
 
     const $ = id => document.getElementById(id);
     const esc = v => String(v ?? '').replace(/[&<>'"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
     const stripTags = v => String(v ?? '').replace(/<[^>]*>/g, '');
-    const makeNaverMapUrl = item => `https://map.naver.com/v5/search/${encodeURIComponent((item.name || '') + ' ' + (item.address || ''))}`;
+    const mapSearchQuery = item => (item.address && item.address !== '정보 없음') ? item.address : (item.name || '');
+    const makeNaverMapUrl = item => `https://map.naver.com/v5/search/${encodeURIComponent(mapSearchQuery(item))}`;
     const isNaverMapUrl = url => /^https?:\/\/([^/]+\.)?map\.naver\.com\//.test(String(url || ''));
     // 리스트/핀의 지도 버튼은 DB에 남은 과거 카카오 mapUrl을 절대 사용하지 않고 항상 네이버로 연다.
     const naverSearchUrl = item => makeNaverMapUrl(item);
@@ -180,14 +181,16 @@
       const withCoords = getFilteredItems().filter(i => Number(i.lat) && Number(i.lng));
       const center = withCoords[0] ? new naver.maps.LatLng(Number(withCoords[0].lat), Number(withCoords[0].lng)) : new naver.maps.LatLng(37.5665, 126.9780);
       if (!naverMap) { naverMap = new naver.maps.Map('naverMap', {center, zoom: withCoords.length ? 13 : 11}); infoWindow = new naver.maps.InfoWindow({anchorSkew:true}); }
+      if (!mapClickCloseBound) { naver.maps.Event.addListener(naverMap, 'click', () => closeInfoWindow()); mapClickCloseBound = true; }
       setTimeout(() => naver.maps.Event.trigger(naverMap, 'resize'), 50); renderMarkers();
     }
     function renderMarkers(){
       if (!naverMap) return; markers.forEach(m => m.setMap(null)); markers = [];
       const bounds = new naver.maps.LatLngBounds(); let count = 0;
-      getFilteredItems().forEach(item => { if (!Number(item.lat) || !Number(item.lng)) return; const pos = new naver.maps.LatLng(Number(item.lat), Number(item.lng)); const marker = new naver.maps.Marker({position:pos,map:naverMap,title:item.name}); naver.maps.Event.addListener(marker,'click',() => { infoWindow.setContent(`<div style="padding:12px;min-width:190px;"><b>${esc(item.name)}</b><br><span style="font-size:12px;color:#666;">${esc(item.address || '')}</span><br><button onclick="openNaverMap('${esc(item.id)}')" style="margin-top:8px;padding:6px 10px;border:0;border-radius:12px;background:#03C75A;color:white;font-weight:700;">네이버지도 열기</button></div>`); infoWindow.open(naverMap, marker); }); markers.push(marker); bounds.extend(pos); count++; });
+      getFilteredItems().forEach(item => { if (!Number(item.lat) || !Number(item.lng)) return; const pos = new naver.maps.LatLng(Number(item.lat), Number(item.lng)); const marker = new naver.maps.Marker({position:pos,map:naverMap,title:item.name}); naver.maps.Event.addListener(marker,'click',() => { infoWindow.setContent(`<div style="padding:12px;min-width:210px;position:relative;"><button onclick="closeInfoWindow()" style="position:absolute;right:6px;top:6px;border:0;background:#f1f3f5;border-radius:50%;width:24px;height:24px;cursor:pointer;">×</button><b style="display:block;padding-right:26px;">${esc(item.name)}</b><br><span style="font-size:12px;color:#666;">${esc(item.address || '')}</span><br><button onclick="openNaverMap('${esc(item.id)}')" style="margin-top:8px;padding:6px 10px;border:0;border-radius:12px;background:#03C75A;color:white;font-weight:700;">네이버지도 열기</button></div>`); infoWindow.open(naverMap, marker); }); markers.push(marker); bounds.extend(pos); count++; });
       if (count > 1) naverMap.fitBounds(bounds, {top:60,right:30,bottom:30,left:30}); else if (count === 1) naverMap.setCenter(bounds.getCenter());
     }
+    function closeInfoWindow(){ if(infoWindow) infoWindow.close(); }
     function openNaverMap(id){ const item = dbItems.find(i => i.id === id); if(!item) return; window.open(naverSearchUrl(item), '_blank'); }
 
     function openAddModal(){ editingId = null; $('modalTitle').innerText = '🏠 맛집 추가'; $('btnSubmit').innerText = '이 장소 저장하기'; resetForm(); $('modalOverlay').classList.add('show'); }
@@ -196,7 +199,7 @@
     function resetForm(){ ['inputName','inputCategory','inputAddress','inputLat','inputLng','inputMemo'].forEach(id => $(id).value = ''); $('inputWaiting').value = '하'; $('inputParking').value = '가능'; $('searchResults').innerHTML = ''; $('searchResults').classList.remove('show'); selectedPlace = null; }
 
     async function searchNaver(){
-      const q = $('inputName').value.trim(); if(!q) return; const btn = $('btnSearch'); btn.disabled = true; btn.innerHTML = '<span class="loading-ring"></span>'; const resBox = $('searchResults');
+      const q = ($('inputAddress').value.trim() || $('inputName').value.trim()); if(!q) return alert('주소를 입력해 주세요. 네이버 지오코딩은 주소 검색이 가장 정확합니다.'); const btn = $('btnSearch'); btn.disabled = true; btn.innerHTML = '<span class="loading-ring"></span>'; const resBox = $('searchResults');
       try {
         let results = [];
         if (naverProxyUrl) results = await searchByProxy(q);
@@ -215,9 +218,9 @@
         return { name, category: stripTags(it.category || '기타'), address, lat: it.lat || it.latitude || (it.mapy ? Number(it.mapy) / 10000000 : ''), lng: it.lng || it.longitude || (it.mapx ? Number(it.mapx) / 10000000 : ''), mapUrl: isNaverMapUrl(it.link) ? it.link : makeNaverMapUrl({name, address}) };
       }).filter(x => x.name || x.address);
     }
-    function geocodeToResults(q){ return new Promise(resolve => { if(!window.naver?.maps?.Service?.geocode) return resolve([]); naver.maps.Service.geocode({query:q}, (status, response) => { if(status !== naver.maps.Service.Status.OK) return resolve([]); const addresses = response.v2?.addresses || []; resolve(addresses.map(a => ({name:q, category:'기타', address:a.roadAddress || a.jibunAddress || q, lat:Number(a.y), lng:Number(a.x), mapUrl:`https://map.naver.com/v5/search/${encodeURIComponent(q)}`}))); }); }); }
+    function geocodeToResults(q){ return new Promise(resolve => { if(!window.naver?.maps?.Service?.geocode) return resolve([]); naver.maps.Service.geocode({query:q}, (status, response) => { if(status !== naver.maps.Service.Status.OK) return resolve([]); const addresses = response.v2?.addresses || []; resolve(addresses.map(a => { const address = a.roadAddress || a.jibunAddress || q; return {name:$('inputName')?.value?.trim() || q, category:'기타', address, lat:Number(a.y), lng:Number(a.x), mapUrl:makeNaverMapUrl({address})}; })); }); }); }
     function pickPlace(i){ const p = window.lastResults[i]; selectedPlace = p; $('inputName').value = p.name; $('inputCategory').value = p.category || '기타'; $('inputAddress').value = p.address || ''; $('inputLat').value = p.lat || ''; $('inputLng').value = p.lng || ''; $('searchResults').classList.remove('show'); }
-    async function geocodeAddressFromForm(){ const q = $('inputAddress').value.trim() || $('inputName').value.trim(); if(!q || $('inputLat').value || $('inputLng').value) return; const res = await geocodeToResults(q); if(res[0]) { $('inputLat').value = res[0].lat; $('inputLng').value = res[0].lng; } }
+    async function geocodeAddressFromForm(){ const q = $('inputAddress').value.trim(); if(!q || $('inputLat').value || $('inputLng').value) return; const res = await geocodeToResults(q); if(res[0]) { $('inputLat').value = res[0].lat; $('inputLng').value = res[0].lng; } }
 
     async function saveToFirebase(){
       const name = $('inputName').value.trim(); if(!name) return alert('상호명을 입력해 주세요.'); if(!$('inputLat').value || !$('inputLng').value) await geocodeAddressFromForm();
@@ -246,8 +249,7 @@
       let done = 0;
       for (const item of targets) {
         try {
-          const query = `${item.address} ${item.name || ''}`.trim();
-          const r = await geocodeToResults(query);
+          const r = await geocodeToResults(item.address);
           if(r[0]) {
             await db.ref(`restaurants/${item.id}`).update({lat:r[0].lat,lng:r[0].lng,mapUrl:makeNaverMapUrl(item)});
           }
