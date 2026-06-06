@@ -85,7 +85,8 @@
     const stripTags = v => String(v ?? '').replace(/<[^>]*>/g, '');
     const makeNaverMapUrl = item => `https://map.naver.com/v5/search/${encodeURIComponent((item.name || '') + ' ' + (item.address || ''))}`;
     const isNaverMapUrl = url => /^https?:\/\/([^/]+\.)?map\.naver\.com\//.test(String(url || ''));
-    const naverSearchUrl = item => isNaverMapUrl(item.mapUrl) ? item.mapUrl : makeNaverMapUrl(item);
+    // 리스트/핀의 지도 버튼은 DB에 남은 과거 카카오 mapUrl을 절대 사용하지 않고 항상 네이버로 연다.
+    const naverSearchUrl = item => makeNaverMapUrl(item);
 
     auth.onAuthStateChanged(user => {
       authReady.finally(() => {
@@ -156,7 +157,7 @@
         <div class="restaurant-card"><div class="card-header"><span class="res-name">${esc(item.name)}</span><span class="res-cat">${esc(item.category || '기타')}</span></div>
         <p class="res-addr">${esc(item.address || '정보 없음')}</p>${item.memo ? `<p style="font-size:.85rem;color:#555;background:#f9f9f9;padding:8px 12px;border-radius:8px;margin-bottom:10px;border-left:3px solid var(--primary);">📝 ${esc(item.memo)}</p>` : ''}
         <div class="tags"><span class="tag tag-waiting">웨이팅: ${esc(item.waiting || '-')}</span><span class="tag tag-parking">주차: ${esc(item.parking || '-')}</span><span class="tag tag-pin">${item.lat && item.lng ? '📍 핀 있음' : '📍 좌표 없음'}</span></div>
-        <div class="card-footer"><span class="card-date">${esc(item.date || '')} (${esc(item.author || '가족')})</span><div class="inline-actions"><button class="btn-map" onclick="openNaverMap('${esc(item.id)}')">지도</button><button class="btn-del" style="background:#e8f0fe;color:#1a73e8;" onclick="openEditModal('${esc(item.id)}')">✏️</button><button class="btn-del" onclick="removeFromFirebase('${esc(item.id)}')">🗑️</button></div></div></div>`).join('');
+        <div class="card-footer"><span class="card-date">${esc(item.date || '')} (${esc(item.author || '가족')})</span><div class="inline-actions"><button class="btn-map" onclick="openNaverMap('${esc(item.id)}')">네이버</button><button class="btn-del" style="background:#e8f0fe;color:#1a73e8;" onclick="openEditModal('${esc(item.id)}')">✏️</button><button class="btn-del" onclick="removeFromFirebase('${esc(item.id)}')">🗑️</button></div></div></div>`).join('');
     }
 
     function switchView(view){
