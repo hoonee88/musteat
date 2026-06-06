@@ -227,7 +227,7 @@
     function removeFromFirebase(id){ if(confirm('삭제하시겠습니까? (가족 모두의 목록에서 삭제됩니다)')) db.ref(`restaurants/${id}`).remove(); }
 
     async function normalizeLegacyMapUrls(){
-      const targets = dbItems.filter(i => i.mapUrl && !isNaverMapUrl(i.mapUrl)).slice(0,20);
+      const targets = dbItems.filter(i => i.mapUrl && !isNaverMapUrl(i.mapUrl));
       for (const item of targets) {
         try { await db.ref(`restaurants/${item.id}`).update({mapUrl: makeNaverMapUrl(item)}); }
         catch(e) { console.warn('legacy mapUrl normalize failed', item.id, e); }
@@ -235,10 +235,29 @@
     }
 
     let geocodeQueueRunning = false;
+    const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
     async function autoGeocodeMissingItems(){
-      if(geocodeQueueRunning || !window.naver?.maps?.Service?.geocode) return; geocodeQueueRunning = true;
-      const targets = dbItems.filter(i => (!i.lat || !i.lng) && i.address && i.address !== '정보 없음').slice(0,5);
-      for (const item of targets) { try { const r = await geocodeToResults(item.address); if(r[0]) await db.ref(`restaurants/${item.id}`).update({lat:r[0].lat,lng:r[0].lng,mapUrl:makeNaverMapUrl(item)}); } catch(e) { console.warn('auto geocode failed', item.id, e); } }
+      if(geocodeQueueRunning || !window.naver?.maps?.Service?.geocode) return;
+      const targets = dbItems.filter(i => (!Number(i.lat) || !Number(i.lng)) && i.address && i.address !== '정보 없음');
+      if (!targets.length) return;
+      geocodeQueueRunning = true;
+      $('txtSyncStatus').innerText = `📍 핀 변환 중 0/${targets.length}`;
+      let done = 0;
+      for (const item of targets) {
+        try {
+          const query = `${item.address} ${item.name || ''}`.trim();
+          const r = await geocodeToResults(query);
+          if(r[0]) {
+            await db.ref(`restaurants/${item.id}`).update({lat:r[0].lat,lng:r[0].lng,mapUrl:makeNaverMapUrl(item)});
+          }
+        } catch(e) {
+          console.warn('auto geocode failed', item.id, e);
+        }
+        done += 1;
+        $('txtSyncStatus').innerText = `📍 핀 변환 중 ${done}/${targets.length}`;
+        await sleep(180);
+      }
+      $('txtSyncStatus').innerText = '✅ 핀 변환 완료';
       geocodeQueueRunning = false;
     }
   </script>
