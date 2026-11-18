@@ -47,7 +47,7 @@
       <header class="header"><div class="header-row"><h1>🍽️ 맛집 리스트</h1><button class="btn-logout" onclick="logout()">로그아웃</button></div><div class="user-info"><span id="txtUserEmail">사용자 확인 중...</span><span id="txtSyncStatus" style="color:rgba(255,255,255,.9);font-weight:bold;">동기화 중...</span></div></header>
       <div class="tabs"><button id="tabList" class="tab-btn active" onclick="switchView('list')">목록</button><button id="tabMap" class="tab-btn" onclick="switchView('map')">지도 핀</button></div>
       <div class="search-inner"><div class="search-box"><input type="text" id="filterInput" placeholder="맛집 이름/주소/메모 검색..." oninput="refreshResults()" aria-label="저장된 맛집 검색" /></div><div class="search-tools"><select id="parkingFilter" aria-label="주차 필터" onchange="refreshResults()"><option value="">주차 전체</option><option value="가능">주차 가능</option><option value="공영">공영주차</option><option value="불가">주차 불가</option></select><select id="sortOrder" aria-label="정렬 순서" onchange="refreshResults()"><option value="recent">최근 저장순</option><option value="name">이름순</option></select></div><div class="search-summary"><span id="resultCount" role="status">맛집 불러오는 중…</span><button class="text-button" onclick="resetFilters()">필터 초기화</button></div></div><div id="listPanel"><div id="listBody" class="list-body"></div></div>
-      <div id="mapPanel" class="map-panel"><div class="map-help">핀을 누르면 맛집 정보가 열립니다. 좌표가 없는 기존 항목은 주소 기준으로 자동 좌표 변환을 시도합니다.</div><div id="naverMap" class="map-canvas"></div></div>
+      <div id="mapPanel" class="map-panel"><div class="map-help">핀을 누르면 맛집 정보가 열립니다. 좌표가 없는 항목은 수정에서 가게를 검색해 선택해 주세요.</div><div id="naverMap" class="map-canvas"></div></div>
       <button class="fab" onclick="openAddModal()"><span aria-hidden="true">＋</span> 맛집 추가</button>
     </div>
   </div>
@@ -162,19 +162,6 @@
     function initNaverAndMain(){
       showScreen('screenMain');
       startDBSync();
-      if (!naverClientId) {
-        $('txtSyncStatus').innerText = '✅ 목록 동기화';
-        return;
-      }
-      if (window.naver && window.naver.maps) return;
-      const script = document.createElement('script');
-      script.src = `https://oapi.map.naver.com/openapi/v3/maps.js?ncpKeyId=${encodeURIComponent(naverClientId)}&submodules=geocoder`;
-      script.onerror = () => {
-        console.error('네이버 지도 SDK 로드 실패');
-        alert('네이버 지도 SDK 로드 실패. Client ID와 도메인 허용 설정을 확인해 주세요. 맛집 목록은 계속 사용할 수 있습니다.');
-      };
-      script.onload = () => { if (currentView === 'map') initMap(); autoGeocodeMissingItems(); };
-      document.head.appendChild(script);
     }
 
     function startDBSync(){
@@ -207,34 +194,43 @@
         <div class="card-footer"><span class="card-date">${esc(item.date || '')} (${esc(item.author || '가족')})</span><div class="inline-actions"><button class="btn-map" onclick="openNaverMap('${esc(item.id)}')">네이버 지도 ↗</button><button class="btn-del" style="background:#e8f0fe;color:#1a73e8;" aria-label="맛집 수정" onclick="openEditModal('${esc(item.id)}')">✏️</button><button class="btn-del" aria-label="맛집 삭제" onclick="removeFromFirebase('${esc(item.id)}')">🗑️</button></div></div></div>`).join('');
     }
 
-    function switchView(view){
-      if (view === 'map' && !naverClientId) {
-        const key = prompt('지도 핀 기능을 쓰려면 네이버 Maps JavaScript API Client ID/ncpKeyId를 입력해 주세요.');
-        if (!key) return;
-        localStorage.setItem('naver_maps_client_id', key.trim());
-        naverClientId = key.trim();
-        initNaverAndMain();
-      }
+    async function switchView(view){
       currentView = view;
       $('tabList').classList.toggle('active', view === 'list');
       $('tabMap').classList.toggle('active', view === 'map');
       $('listPanel').style.display = view === 'list' ? 'block' : 'none';
       $('mapPanel').classList.toggle('show', view === 'map');
-      if(view === 'map') setTimeout(initMap, 80);
+      if(view !== 'map') return;
+      try {
+        await loadKakaoPlaces();
+        if(currentView === 'map') initMap();
+      } catch(error) {
+        if(error.message !== '카카오 키 없음') alert('카카오 지도를 불러오지 못했어요. 기존 카카오 키와 허용 도메인을 확인해 주세요.');
+        if(currentView === 'map') switchView('list');
+      }
     }
     function initMap(){
-      if (!window.naver || !window.naver.maps) return;
+      if (currentView !== 'map' || !window.kakao?.maps?.Map || !kakaoPlaces) return;
       const withCoords = getFilteredItems().filter(i => Number(i.lat) && Number(i.lng));
-      const center = withCoords[0] ? new naver.maps.LatLng(Number(withCoords[0].lat), Number(withCoords[0].lng)) : new naver.maps.LatLng(37.5665, 126.9780);
-      if (!naverMap) { naverMap = new naver.maps.Map('naverMap', {center, zoom: withCoords.length ? 13 : 11}); infoWindow = new naver.maps.InfoWindow({anchorSkew:true,zIndex:1000}); }
-      if (!mapClickCloseBound) { naver.maps.Event.addListener(naverMap, 'click', () => closeInfoWindow()); mapClickCloseBound = true; }
-      setTimeout(() => naver.maps.Event.trigger(naverMap, 'resize'), 50); renderMarkers();
+      const center = withCoords[0] ? new kakao.maps.LatLng(Number(withCoords[0].lat), Number(withCoords[0].lng)) : new kakao.maps.LatLng(37.5665, 126.9780);
+      if (!naverMap) { naverMap = new kakao.maps.Map($('naverMap'), {center, level: withCoords.length ? 5 : 8}); infoWindow = new kakao.maps.InfoWindow({removable:true,zIndex:1000}); }
+      if (!mapClickCloseBound) { kakao.maps.event.addListener(naverMap, 'click', closeInfoWindow); mapClickCloseBound = true; }
+      naverMap.relayout(); renderMarkers();
     }
     function renderMarkers(){
-      if (!naverMap) return; markers.forEach(m => m.setMap(null)); markers = [];
-      const bounds = new naver.maps.LatLngBounds(); let count = 0;
-      getFilteredItems().forEach(item => { if (!Number(item.lat) || !Number(item.lng)) return; const pos = new naver.maps.LatLng(Number(item.lat), Number(item.lng)); const marker = new naver.maps.Marker({position:pos,map:naverMap,title:item.name}); naver.maps.Event.addListener(marker,'click',(event) => { event?.pointerEvent?.stopPropagation?.(); infoWindow.setContent(`<div style="padding:12px;min-width:210px;position:relative;"><button onclick="closeInfoWindow()" style="position:absolute;right:6px;top:6px;border:0;background:#f1f3f5;border-radius:50%;width:24px;height:24px;cursor:pointer;">×</button><b class="marker-place-name" style="display:block;padding-right:26px;color:#202720;font-size:16px;">${esc(item.name)}</b><br><span style="font-size:12px;color:#666;">${esc(item.address || '')}</span><br><button onclick="openNaverMap('${esc(item.id)}')" style="margin-top:8px;padding:6px 10px;border:0;border-radius:12px;background:#03C75A;color:white;font-weight:700;">네이버에서 검색</button></div>`); infoWindow.open(naverMap, marker); }); markers.push(marker); bounds.extend(pos); count++; });
-      if (count > 1) naverMap.fitBounds(bounds, {top:60,right:30,bottom:30,left:30}); else if (count === 1) naverMap.setCenter(bounds.getCenter());
+      if (!naverMap) return; closeInfoWindow(); markers.forEach(m => m.setMap(null)); markers = [];
+      const bounds = new kakao.maps.LatLngBounds(); let count = 0, onlyPosition;
+      getFilteredItems().forEach(item => {
+        if (!Number(item.lat) || !Number(item.lng)) return;
+        const pos = new kakao.maps.LatLng(Number(item.lat), Number(item.lng));
+        const marker = new kakao.maps.Marker({position:pos,map:naverMap,title:item.name});
+        kakao.maps.event.addListener(marker,'click',() => {
+          infoWindow.setContent(`<div style="padding:12px;min-width:210px;max-width:260px;"><b class="marker-place-name" style="display:block;padding-right:26px;color:#202720;font-size:16px;">${esc(item.name)}</b><span style="font-size:12px;color:#666;">${esc(item.address || '')}</span></div>`);
+          infoWindow.open(naverMap, marker);
+        });
+        markers.push(marker); bounds.extend(pos); onlyPosition=pos; count++;
+      });
+      if (count > 1) naverMap.setBounds(bounds,60,30,30,30); else if (count === 1) naverMap.setCenter(onlyPosition);
     }
     function closeInfoWindow(){ if(infoWindow) infoWindow.close(); }
     function openNaverMap(id){ const item = dbItems.find(i => i.id === id); if(!item) return; window.open(naverSearchUrl(item), '_blank', 'noopener,noreferrer'); }
