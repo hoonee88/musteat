@@ -39,7 +39,7 @@
       <p style="margin-bottom:20px;color:#666;">네이버 클라우드 플랫폼의<br><b>Maps JavaScript API Client ID / ncpKeyId</b>를 입력해 주세요.</p>
       <input type="text" id="naverInput" placeholder="네이버 지도 Client ID 또는 ncpKeyId" style="margin-bottom:12px;" />
       <input type="text" id="naverProxyInput" placeholder="선택: 네이버 지역검색 프록시 URL" style="margin-bottom:12px;" />
-      <div class="small-note">장소명 검색은 네이버 Local Search API의 Client Secret이 필요해 브라우저에 직접 넣으면 안 됩니다. 프록시 URL이 없으면 검색 버튼이 네이버 지도를 직접 엽니다. 앱 안에 검색 결과를 표시하려면 별도의 지역검색 프록시가 필요합니다. 지도 좌표는 입력한 주소로 변환합니다.</div>
+      <div class="small-note">장소명 검색은 네이버 Local Search API의 Client Secret이 필요해 브라우저에 직접 넣으면 안 됩니다. 프록시 URL이 없으면 주소/상호명 지오코딩으로 좌표를 찾고, 네이버 지도 검색 링크를 연결합니다.</div>
       <button class="btn-submit" onclick="saveNaverSettings()">설정 완료</button>
     </div>
 
@@ -53,10 +53,10 @@
   </div>
 
   <div id="modalOverlay" class="modal-overlay" onclick="closeModal(event)"><div class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle" onclick="event.stopPropagation()"><div class="modal-header"><h2 id="modalTitle">🏠 맛집 추가</h2><button class="close-btn" aria-label="닫기" onclick="closeModalDirect()">&times;</button></div>
-    <div class="form-group"><label>상호명/주소 검색</label><div class="search-row"><input type="text" id="inputName" placeholder="예: 금메달곱창, 강남 우동" /><button class="btn-search" id="btnSearch" onclick="searchNaver()">네이버 검색</button></div><div id="searchResults" class="search-results"></div></div>
+    <div class="form-group"><label>상호명/주소 검색</label><div class="search-row"><input type="text" id="inputName" placeholder="상호명 또는 주소 입력: 예) 돼지, 서울 강남구 ..." /><button class="btn-search" id="btnSearch" onclick="searchKakao()">검색</button></div><div id="searchResults" class="search-results"></div></div>
     <div class="form-group"><label>종류</label><input type="text" id="inputCategory" placeholder="예: 한식, 일식, 카페" /></div>
-    <div class="form-group"><label>주소</label><input type="text" id="inputAddress" placeholder="네이버 지도에서 확인한 주소 또는 검색 결과 선택" onchange="geocodeAddressFromForm()" /></div>
-    <details class="coordinate-details" id="coordinateDetails"><summary>지도 좌표 · 주소 입력 후 자동 변환</summary><div style="display:flex;gap:10px;"><div class="form-group" style="flex:1;"><label>위도</label><input type="number" step="any" id="inputLat" placeholder="자동" /></div><div class="form-group" style="flex:1;"><label>경도</label><input type="number" step="any" id="inputLng" placeholder="자동" /></div></div></details>
+    <div class="form-group"><label>주소</label><input type="text" id="inputAddress" placeholder="검색 선택 시 자동 입력" onchange="geocodeAddressFromForm()" /></div>
+    <details class="coordinate-details" id="coordinateDetails"><summary>지도 좌표 · 자동으로 입력돼요</summary><div style="display:flex;gap:10px;"><div class="form-group" style="flex:1;"><label>위도</label><input type="number" step="any" id="inputLat" placeholder="자동" /></div><div class="form-group" style="flex:1;"><label>경도</label><input type="number" step="any" id="inputLng" placeholder="자동" /></div></div></details>
     <div style="display:flex;gap:10px;"><div class="form-group" style="flex:1;"><label>웨이팅</label><select id="inputWaiting"><option value="하">하 (여유)</option><option value="중">중 (보통)</option><option value="상">상 (치열)</option></select></div><div class="form-group" style="flex:1;"><label>주차</label><select id="inputParking"><option value="가능">가능</option><option value="불가">불가</option><option value="공영">공영</option></select></div></div>
     <div class="form-group"><label>추가 메모</label><textarea id="inputMemo" placeholder="예: 시그니처 메뉴, 주의사항 등" style="min-height:80px;resize:vertical;"></textarea></div>
     <button class="btn-submit" id="btnSubmit" onclick="saveToFirebase()">이 장소 저장하기</button>
@@ -83,13 +83,15 @@
 
     let naverClientId = localStorage.getItem('naver_maps_client_id') || '';
     let naverProxyUrl = localStorage.getItem('naver_local_proxy_url') || '';
+    let kakaoKey = localStorage.getItem('kakao_js_key') || '';
+    let kakaoPlaces = null, kakaoLoading = null;
     let dbItems = [], editingId = null, selectedPlace = null;
     let naverMap = null, markers = [], infoWindow = null, currentView = 'list', dbSyncStarted = false, mapClickCloseBound = false;
 
     const $ = id => document.getElementById(id);
     const esc = v => String(v ?? '').replace(/[&<>'"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
     const stripTags = v => String(v ?? '').replace(/<[^>]*>/g, '');
-    const mapSearchQuery = item => String(item.name || '').trim() || (item.address !== '정보 없음' ? String(item.address || '').trim() : '');
+    const mapSearchQuery = item => String(item.name || '').trim();
     const makeNaverMapUrl = item => `https://map.naver.com/v5/search/${encodeURIComponent(mapSearchQuery(item))}`;
     const isNaverMapUrl = url => /^https?:\/\/([^/]+\.)?map\.naver\.com\//.test(String(url || ''));
     // 리스트/핀의 지도 버튼은 DB에 남은 과거 카카오 mapUrl을 절대 사용하지 않고 항상 네이버로 연다.
@@ -128,6 +130,35 @@
     function showScreen(id){ ['screenLogin','screenApi','screenMain'].forEach(s => $(s).style.display = s === id ? (s === 'screenLogin' ? 'flex' : 'block') : 'none'); }
     function saveNaverSettings(){ const key = $('naverInput').value.trim(); const proxy = $('naverProxyInput').value.trim(); if(!key) return alert('네이버 지도 Client ID를 입력해 주세요.'); localStorage.setItem('naver_maps_client_id', key); if(proxy) localStorage.setItem('naver_local_proxy_url', proxy); else localStorage.removeItem('naver_local_proxy_url'); location.reload(); }
 
+    async function loadKakaoPlaces(){
+      if (kakaoPlaces) return kakaoPlaces;
+      if (!kakaoKey) {
+        const key = prompt('상호명 검색에는 카카오 JavaScript 키가 필요합니다. 기존 카카오 키를 입력해 주세요.');
+        if (!key) throw new Error('카카오 키 없음');
+        kakaoKey = key.trim();
+        localStorage.setItem('kakao_js_key', kakaoKey);
+      }
+      if (kakaoLoading) return kakaoLoading;
+      kakaoLoading = new Promise((resolve, reject) => {
+        if (window.kakao?.maps?.services) {
+          kakao.maps.load(() => {
+            kakaoPlaces = new kakao.maps.services.Places();
+            resolve(kakaoPlaces);
+          });
+          return;
+        }
+        const script = document.createElement('script');
+        script.src = `https://dapi.kakao.com/v2/maps/sdk.js?appkey=${encodeURIComponent(kakaoKey)}&libraries=services&autoload=false`;
+        script.onerror = () => reject(new Error('카카오 장소검색 SDK 로드 실패'));
+        script.onload = () => { if(!window.kakao?.maps?.load){ reject(new Error('카카오 SDK 인증 실패')); return; } kakao.maps.load(() => {
+          kakaoPlaces = new kakao.maps.services.Places();
+          resolve(kakaoPlaces);
+        }); };
+        document.head.appendChild(script);
+      });
+      try { return await kakaoLoading; } catch(error) { kakaoLoading=null; throw error; }
+    }
+
     function initNaverAndMain(){
       showScreen('screenMain');
       startDBSync();
@@ -153,7 +184,7 @@
         const data = snapshot.val(); dbItems = [];
         if (data) Object.keys(data).forEach(key => dbItems.push({id:key, ...data[key]}));
         dbItems.sort((a,b) => (b.timestamp || 0) - (a.timestamp || 0));
-        $('txtSyncStatus').innerText = '✅ 동기화 완료'; renderList(); if (currentView === 'map') initMap(); normalizeLegacyMapUrls(); autoGeocodeMissingItems();
+        $('txtSyncStatus').innerText = '✅ 동기화 완료'; renderList(); if (currentView === 'map') initMap();
       }, error => { console.error(error); $('txtSyncStatus').innerText = '❌ 동기화 실패'; });
     }
 
@@ -195,14 +226,14 @@
       if (!window.naver || !window.naver.maps) return;
       const withCoords = getFilteredItems().filter(i => Number(i.lat) && Number(i.lng));
       const center = withCoords[0] ? new naver.maps.LatLng(Number(withCoords[0].lat), Number(withCoords[0].lng)) : new naver.maps.LatLng(37.5665, 126.9780);
-      if (!naverMap) { naverMap = new naver.maps.Map('naverMap', {center, zoom: withCoords.length ? 13 : 11}); infoWindow = new naver.maps.InfoWindow({anchorSkew:true}); }
+      if (!naverMap) { naverMap = new naver.maps.Map('naverMap', {center, zoom: withCoords.length ? 13 : 11}); infoWindow = new naver.maps.InfoWindow({anchorSkew:true,zIndex:1000}); }
       if (!mapClickCloseBound) { naver.maps.Event.addListener(naverMap, 'click', () => closeInfoWindow()); mapClickCloseBound = true; }
       setTimeout(() => naver.maps.Event.trigger(naverMap, 'resize'), 50); renderMarkers();
     }
     function renderMarkers(){
       if (!naverMap) return; markers.forEach(m => m.setMap(null)); markers = [];
       const bounds = new naver.maps.LatLngBounds(); let count = 0;
-      getFilteredItems().forEach(item => { if (!Number(item.lat) || !Number(item.lng)) return; const pos = new naver.maps.LatLng(Number(item.lat), Number(item.lng)); const marker = new naver.maps.Marker({position:pos,map:naverMap,title:item.name}); naver.maps.Event.addListener(marker,'click',() => { infoWindow.setContent(`<div style="padding:12px;min-width:210px;position:relative;"><button onclick="closeInfoWindow()" style="position:absolute;right:6px;top:6px;border:0;background:#f1f3f5;border-radius:50%;width:24px;height:24px;cursor:pointer;">×</button><b style="display:block;padding-right:26px;">${esc(item.name)}</b><br><span style="font-size:12px;color:#666;">${esc(item.address || '')}</span><br><button onclick="openNaverMap('${esc(item.id)}')" style="margin-top:8px;padding:6px 10px;border:0;border-radius:12px;background:#03C75A;color:white;font-weight:700;">네이버지도 열기</button></div>`); infoWindow.open(naverMap, marker); }); markers.push(marker); bounds.extend(pos); count++; });
+      getFilteredItems().forEach(item => { if (!Number(item.lat) || !Number(item.lng)) return; const pos = new naver.maps.LatLng(Number(item.lat), Number(item.lng)); const marker = new naver.maps.Marker({position:pos,map:naverMap,title:item.name}); naver.maps.Event.addListener(marker,'click',(event) => { event?.pointerEvent?.stopPropagation?.(); infoWindow.setContent(`<div style="padding:12px;min-width:210px;position:relative;"><button onclick="closeInfoWindow()" style="position:absolute;right:6px;top:6px;border:0;background:#f1f3f5;border-radius:50%;width:24px;height:24px;cursor:pointer;">×</button><b class="marker-place-name" style="display:block;padding-right:26px;color:#202720;font-size:16px;">${esc(item.name)}</b><br><span style="font-size:12px;color:#666;">${esc(item.address || '')}</span><br><button onclick="openNaverMap('${esc(item.id)}')" style="margin-top:8px;padding:6px 10px;border:0;border-radius:12px;background:#03C75A;color:white;font-weight:700;">네이버에서 검색</button></div>`); infoWindow.open(naverMap, marker); }); markers.push(marker); bounds.extend(pos); count++; });
       if (count > 1) naverMap.fitBounds(bounds, {top:60,right:30,bottom:30,left:30}); else if (count === 1) naverMap.setCenter(bounds.getCenter());
     }
     function closeInfoWindow(){ if(infoWindow) infoWindow.close(); }
@@ -218,36 +249,63 @@
     function toast(message){let el=$('toast');if(!el){el=document.createElement('div');el.id='toast';el.className='toast';el.setAttribute('role','status');document.body.appendChild(el);}el.textContent=message;el.hidden=false;clearTimeout(toastTimer);toastTimer=setTimeout(()=>el.hidden=true,3000);}
     document.addEventListener('keydown',e=>{if(!$('modalOverlay').classList.contains('show'))return;if(e.key==='Escape'){e.preventDefault();closeModalDirect();}if(e.key==='Tab'){const els=Array.from(document.querySelector('.modal').querySelectorAll('button,input,select,textarea,summary')).filter(el=>!el.disabled && el.getClientRects().length);const first=els[0],last=els[els.length-1];if(e.shiftKey&&document.activeElement===first){e.preventDefault();last.focus();}else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first.focus();}}});
     $('inputAddress').addEventListener('input',()=>{selectedPlace=null;$('inputLat').value='';$('inputLng').value='';});
-    $('inputName').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();if(!$('btnSearch').disabled)searchNaver();}});
+    $('inputName').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();if(!$('btnSearch').disabled)searchKakao();}});
 
     function resetForm(){ ['inputName','inputCategory','inputAddress','inputLat','inputLng','inputMemo'].forEach(id => $(id).value = ''); $('inputWaiting').value = '하'; $('inputParking').value = '가능'; $('searchResults').innerHTML = ''; $('searchResults').classList.remove('show'); selectedPlace = null; $('coordinateDetails').open=false; }
 
-    async function searchNaver(){
+    async function searchKakao(){
       const q = $('inputName').value.trim();
-      if(!q) return alert('상호명을 입력해 주세요.');
-      const resBox = $('searchResults');
-      resBox.innerHTML='';resBox.classList.remove('show');
-      // A static page cannot safely hold Naver Local Search's client secret.
-      // Without a configured server proxy, search directly on Naver Maps.
-      if(!naverProxyUrl){
-        window.open(makeNaverMapUrl({name:q}), '_blank', 'noopener,noreferrer');
-        toast('네이버 지도에서 확인한 주소를 입력해 저장해 주세요');
-        return;
-      }
-      const session=modalSession, btn=$('btnSearch');
-      btn.disabled=true;btn.textContent='검색 중…';
-      try{
-        const results=await searchByProxy(q);
-        if(session!==modalSession)return;
-        window.lastResults=results.slice(0,5);
-        resBox.innerHTML=window.lastResults.length
-          ? window.lastResults.map((p,i)=>`<button type="button" class="result-item" style="display:block;width:100%;text-align:left;background:transparent;border:0;border-bottom:1px solid #eee" onclick="pickPlace(${i})"><div class="result-title">${esc(p.name)}</div><div class="result-addr">${esc(p.address)}</div></button>`).join('')
-          : '<p class="result-item">검색 결과가 없습니다. 상호명에 지역을 함께 입력해 보세요.</p>';
-        resBox.classList.add('show');
-      }catch(e){
+      if(!q) return alert('상호명 또는 키워드를 입력해 주세요.');
+      const btn = $('btnSearch'); btn.disabled = true; btn.innerHTML = '<span class="loading-ring"></span>'; const resBox = $('searchResults'); resBox.replaceChildren(); resBox.classList.remove('show'); window.lastResults=[];
+      try {
+        const session=modalSession; const places = await loadKakaoPlaces(); if(session !== modalSession) {btn.disabled=false;btn.innerText='검색';return;}
+        places.keywordSearch(q, (result, status) => {
+          btn.disabled = false; btn.innerText = '검색';
+          if(session !== modalSession || q !== $('inputName').value.trim()) return;
+          if (status === kakao.maps.services.Status.OK) {
+            window.lastResults = result.slice(0, 8).map(p => {
+              const address = p.road_address_name || p.address_name || '';
+              return {
+                name: p.place_name,
+                category: (p.category_name || '기타').split(' > ').pop(),
+                address,
+                lat: Number(p.y),
+                lng: Number(p.x),
+                // 저장/열기는 네이버 기준. 카카오 place_url은 쓰지 않는다.
+                mapUrl: makeNaverMapUrl({name: p.place_name, address})
+              };
+            });
+            resBox.innerHTML = window.lastResults.map((p,i) => `<div class="result-item" onclick="pickPlace(${i})"><div class="result-title">${esc(p.name)}</div><div class="result-addr">${esc(p.address)}</div></div>`).join('');
+            resBox.classList.add('show');
+          } else {
+            alert('검색 결과가 없습니다. 검색어를 바꿔보세요.');
+          }
+        });
+      } catch(e) {
         console.error(e);
-        if(session===modalSession){resBox.innerHTML=`<p class="result-item">앱 내 네이버 검색을 불러오지 못했어요. <a target="_blank" rel="noopener noreferrer" href="${esc(makeNaverMapUrl({name:q}))}">네이버 지도에서 검색하기</a></p>`;resBox.classList.add('show');}
-      }finally{btn.disabled=false;btn.textContent='네이버 검색';}
+        btn.disabled = false; btn.innerText = '검색';
+        alert('카카오 장소검색을 불러오지 못했습니다. 카카오 JavaScript 키와 도메인 허용 설정을 확인해 주세요.');
+      }
+    }
+
+    async function searchNaver(){
+      const keyword = $('inputName').value.trim();
+      const address = $('inputAddress').value.trim();
+      const q = keyword || address;
+      if(!q) return alert('상호명 또는 주소를 입력해 주세요.');
+      const btn = $('btnSearch'); btn.disabled = true; btn.innerHTML = '<span class="loading-ring"></span>'; const resBox = $('searchResults');
+      try {
+        let results = [];
+        if (naverProxyUrl) results = await searchByProxy(q);
+        if (!results.length && address) results = await geocodeToResults(address);
+        if (!results.length && looksLikeAddress(q)) results = await geocodeToResults(q);
+        if (!results.length) {
+          alert('검색 결과가 없습니다. 카카오 검색 또는 주소 검색을 이용해 주세요.');
+          return;
+        }
+        window.lastResults = results; resBox.innerHTML = results.slice(0,5).map((p,i) => `<div class="result-item" onclick="pickPlace(${i})"><div class="result-title">${esc(p.name)}</div><div class="result-addr">${esc(p.address)}</div></div>`).join(''); resBox.classList.add('show');
+      } catch(e) { console.error(e); alert('검색 중 오류가 발생했습니다.'); }
+      finally { btn.disabled = false; btn.innerText = '검색'; }
     }
 
     function looksLikeAddress(q){ return /(시|군|구|동|읍|면|로|길|번길|번지|대로|[0-9])/.test(String(q || '')); }
@@ -274,23 +332,13 @@
         const lat=$('inputLat').value.trim(),lng=$('inputLng').value.trim();
         if(Boolean(lat)!==Boolean(lng) || (lat && (!Number.isFinite(Number(lat)) || Math.abs(Number(lat))>90 || !Number.isFinite(Number(lng)) || Math.abs(Number(lng))>180)))throw new Error('위도와 경도를 모두 올바르게 입력하거나 둘 다 비워 주세요.');
         const now=new Date(), old=dbItems.find(i=>i.id===editingId);
-        const itemData={name,category:$('inputCategory').value.trim() || '기타',address:$('inputAddress').value.trim() || '정보 없음',waiting:$('inputWaiting').value,parking:$('inputParking').value,memo:$('inputMemo').value.trim(),date:old?.date || `${now.getFullYear()}.${String(now.getMonth()+1).padStart(2,'0')}.${String(now.getDate()).padStart(2,'0')}`,timestamp:old?.timestamp || Date.now(),author:old?.author || user.displayName || user.email?.split('@')[0] || '가족',lat:lat?Number(lat):null,lng:lng?Number(lng):null,mapUrl:makeNaverMapUrl({name,address:$('inputAddress').value.trim()})};
+        const itemData={name,category:$('inputCategory').value.trim() || '기타',address:$('inputAddress').value.trim() || '정보 없음',waiting:$('inputWaiting').value,parking:$('inputParking').value,memo:$('inputMemo').value.trim(),date:old?.date || `${now.getFullYear()}.${String(now.getMonth()+1).padStart(2,'0')}.${String(now.getDate()).padStart(2,'0')}`,timestamp:old?.timestamp || Date.now(),author:old?.author || user.displayName || user.email?.split('@')[0] || '가족',lat:lat?Number(lat):null,lng:lng?Number(lng):null,mapUrl:old?.mapUrl || makeNaverMapUrl({name})};
         const ref=db.ref('restaurants');await (editingId?ref.child(editingId).update(itemData):ref.push(itemData));closeModalDirect(true);toast('맛집을 저장했어요');
       }catch(err){console.error(err);alert('저장하지 못했어요. '+err.message);}
       finally{saving=false;$('btnSubmit').disabled=false;$('btnSubmit').textContent=editingId?'수정 완료':'이 장소 저장하기';}
     }
     async function removeFromFirebase(id){const item=dbItems.find(i=>i.id===id);if(!item || !confirm(`“${item.name}”을 삭제할까요? 가족 모두의 목록에서 삭제됩니다.`))return;try{await db.ref(`restaurants/${id}`).remove();toast('맛집을 삭제했어요');}catch(e){alert('삭제하지 못했어요. 잠시 후 다시 시도해 주세요.');}}
 
-    async function normalizeLegacyMapUrls(){
-      const targets = dbItems.filter(i => i.mapUrl && !isNaverMapUrl(i.mapUrl));
-      for (const item of targets) {
-        try { await db.ref(`restaurants/${item.id}`).update({mapUrl: makeNaverMapUrl(item)}); }
-        catch(e) { console.warn('legacy mapUrl normalize failed', item.id, e); }
-      }
-    }
-
-    let geocodeQueueRunning = false;
-    const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
     async function autoGeocodeMissingItems(){
       if(geocodeQueueRunning || !window.naver?.maps?.Service?.geocode) return;
       const targets = dbItems.filter(i => (!Number(i.lat) || !Number(i.lng)) && i.address && i.address !== '정보 없음');
